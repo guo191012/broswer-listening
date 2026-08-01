@@ -1,0 +1,32 @@
+{
+  "name": "vibcoding-request-monitor",
+  "private": true,
+  "version": "0.1.0",
+  "description": "浏览器插件: 监控任意站点发起的特定接口请求",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/build.mjs --watch",
+    "build": "tsc --noEmit && cross-env NODE_ENV=production node scripts/build.mjs",
+    "preview": "vite preview --outDir dist --port 5174 --strictPort",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^5.5.1",
+    "antd": "^5.21.6",
+    "framer-motion": "^11.11.10",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.277",
+    "@types/node": "^22.20.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "cross-env": "^10.1.0",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}
