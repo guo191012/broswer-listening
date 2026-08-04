@@ -4,7 +4,6 @@ import {
   Form,
   Input,
   Modal,
-  Popconfirm,
   Select,
   Switch,
   Tag,
@@ -72,6 +71,23 @@ export function ConfigForm({ config, currentHost, onChange, onRemoveLogs }: Prop
   const [hostInput, setHostInput] = useState('');
   const [form] = Form.useForm<InterfaceFormValues>();
 
+  // 自定义确认弹窗状态 (不用 antd Popconfirm, 避免其在 Shadow DOM 内 onConfirm 不触发)
+  type ConfirmTarget =
+    | { kind: 'iface'; id: string; label: string }
+    | { kind: 'site'; id: string; label: string }
+    | null;
+  const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget>(null);
+
+  function handleConfirmOk(): void {
+    if (!confirmTarget) return;
+    if (confirmTarget.kind === 'iface') {
+      handleDelete(confirmTarget.id);
+    } else {
+      handleRemoveSite(confirmTarget.id);
+    }
+    setConfirmTarget(null);
+  }
+
   const currentSite = useMemo<SiteConfig | null>(() => {
     if (!currentHost) return null;
     return config.sites.find((s) => s.enabled && siteMatches(s.host, currentHost)) ?? null;
@@ -102,13 +118,15 @@ export function ConfigForm({ config, currentHost, onChange, onRemoveLogs }: Prop
   function patchCurrentSite(mutator: (s: SiteConfig) => SiteConfig): void {
     if (!currentHost) return;
     const host = hostInput.trim() || currentHost;
-    const site = upsertSite(host);
-    const updated = mutator(site);
-    const existed = config.sites.some((s) => s.id === site.id);
+    // 优先基于已通配匹配到的站点操作 (如 *.doubao.com 与当前 www.doubao.com 匹配)
+    // 而不是按 host 精确重新查找, 否则会把删除/编辑作用到新建的错误站点上.
+    const baseSite = currentSite ?? upsertSite(host);
+    const updated = mutator(baseSite);
+    const existed = config.sites.some((s) => s.id === baseSite.id);
     const next: AppConfig = {
       ...config,
       sites: existed
-        ? config.sites.map((s) => (s.id === site.id ? updated : s))
+        ? config.sites.map((s) => (s.id === baseSite.id ? updated : s))
         : [...config.sites, updated],
     };
     onChange(next);
@@ -189,10 +207,17 @@ export function ConfigForm({ config, currentHost, onChange, onRemoveLogs }: Prop
   }
 
   function handleDelete(id: string): void {
-    patchCurrentSite((site) => ({
-      ...site,
-      interfaces: site.interfaces.filter((i) => i.id !== id),
-    }));
+    console.info('[vibcoding-ext] 删除规则, id=', id, 'currentSite=', currentSite?.id, 'host=', currentSite?.host, 'configSites=', config.sites.map((s) => `${s.id}:${s.host}:${s.interfaces.length}条`));
+    // 直接在所有站点里按接口 id 全局过滤, 不依赖"当前站点"匹配, 保证一定能删掉
+    const next: AppConfig = {
+      ...config,
+      sites: config.sites.map((site) =>
+        site.interfaces.some((i) => i.id === id)
+          ? { ...site, interfaces: site.interfaces.filter((i) => i.id !== id) }
+          : site,
+      ),
+    };
+    onChange(next);
   }
 
   function handleToggleSite(enabled: boolean): void {
@@ -210,6 +235,7 @@ export function ConfigForm({ config, currentHost, onChange, onRemoveLogs }: Prop
   }
 
   function handleRemoveSite(siteId: string): void {
+    console.info('[vibcoding-ext] 删除站点, siteId=', siteId, '当前sites=', config.sites.map((s) => `${s.id}:${s.host}`));
     const next: AppConfig = {
       ...config,
       sites: config.sites.filter((s) => s.id !== siteId),
@@ -350,21 +376,21 @@ export function ConfigForm({ config, currentHost, onChange, onRemoveLogs }: Prop
                       onClick={() => handleStartEdit(iface)}
                     />
                   </Tooltip>
-                  <Popconfirm
-                    title="删除此规则?"
-                    onConfirm={() => handleDelete(iface.id)}
-                    okText="删除"
-                    cancelText="取消"
-                  >
-                    <Tooltip title="删除规则">
-                      <Button
-                        type="text"
-                        size="small"
-                        danger
-                        icon={<DeleteOutlined />}
-                      />
-                    </Tooltip>
-                  </Popconfirm>
+                  <Tooltip title="删除规则">
+                    <Button
+                      type="text"
+                      size="small"
+                      danger
+                      icon={<DeleteOutlined />}
+                      onClick={() =>
+                        setConfirmTarget({
+                          kind: 'iface',
+                          id: iface.id,
+                          label: iface.name,
+                        })
+                      }
+                    />
+                  </Tooltip>
                 </div>
               </div>
             ))}
@@ -503,14 +529,38 @@ export function ConfigForm({ config, currentHost, onChange, onRemoveLogs }: Prop
                       onChange(next);
                     }}
                   />
-                  <Popconfirm title="删除整站配置?" onConfirm={() => handleRemoveSite(s.id)} okText="删除" cancelText="取消">
-                    <Button type="text" danger size="small" icon={<DeleteOutlined />} />
-                  </Popconfirm>
+                  <Button
+                    type="text"
+                    danger
+                    size="small"
+                    icon={<DeleteOutlined />}
+                    onClick={() =>
+                      setConfirmTarget({ kind: 'site', id: s.id, label: s.host })
+                    }
+                  />
                 </div>
               </div>
             ))}
           </div>
         )}
+      </Modal>
+
+      {/* 删除确认 Modal (替代 Popconfirm, 避免 Shadow DOM 内 onConfirm 不触发) */}
+      <Modal
+        title={confirmTarget?.kind === 'site' ? '删除整站配置?' : '删除此规则?'}
+        open={confirmTarget !== null}
+        okText="删除"
+        cancelText="取消"
+        okButtonProps={{ danger: true }}
+        onOk={handleConfirmOk}
+        onCancel={() => setConfirmTarget(null)}
+        destroyOnClose
+      >
+        {confirmTarget ? (
+          <span>
+            确定要删除「<b>{confirmTarget.label}</b>」吗？此操作不可恢复。
+          </span>
+        ) : null}
       </Modal>
     </div>
   );

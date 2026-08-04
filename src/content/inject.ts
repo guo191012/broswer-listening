@@ -71,8 +71,10 @@ window.fetch = function(input, init) {
     console.log('[vibcoding-inject] isStream:', isStream, 'has body:', !!resp.body);
 
     if (isStream && resp.body) {
-      // SSE 流：用 ReadableStream 逐块读取
-      readStreamAsSSE(url, method, resp.status, resp.body);
+      // SSE 流：必须 clone，不能消费原始 resp.body，
+      // 否则页面拿不到流会判定失败并自动重试，导致同一接口被重复请求。
+      var cloneResp = resp.clone();
+      readStreamAsSSE(url, method, resp.status, cloneResp.body);
     } else {
       // 普通响应：clone 后读完整 body
       resp.clone().text().then(function(body) {

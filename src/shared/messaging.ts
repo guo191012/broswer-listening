@@ -7,6 +7,8 @@ import type { AppConfig, LogEntry } from './types';
 
 export const MessageType = {
   REQUEST_HIT: 'REQUEST_HIT',
+  REQUEST_START: 'REQUEST_START',
+  REQUEST_END: 'REQUEST_END',
   CONFIG_UPDATED: 'CONFIG_UPDATED',
   GET_CONFIG: 'GET_CONFIG',
   LOG_PAUSED: 'LOG_PAUSED',
@@ -17,6 +19,16 @@ export type MessageTypeValue = (typeof MessageType)[keyof typeof MessageType];
 export interface RequestHitMessage {
   type: typeof MessageType.REQUEST_HIT;
   payload: LogEntry;
+}
+
+export interface RequestStartMessage {
+  type: typeof MessageType.REQUEST_START;
+  payload: { url: string; method: string };
+}
+
+export interface RequestEndMessage {
+  type: typeof MessageType.REQUEST_END;
+  payload: { url: string; method: string };
 }
 
 export interface ConfigUpdatedMessage {
@@ -35,6 +47,8 @@ export interface LogPausedMessage {
 
 export type ExtensionMessage =
   | RequestHitMessage
+  | RequestStartMessage
+  | RequestEndMessage
   | ConfigUpdatedMessage
   | GetConfigMessage
   | LogPausedMessage;
@@ -44,6 +58,8 @@ export function isExtensionMessage(value: unknown): value is ExtensionMessage {
   const t = (value as { type?: unknown }).type;
   return (
     t === MessageType.REQUEST_HIT ||
+    t === MessageType.REQUEST_START ||
+    t === MessageType.REQUEST_END ||
     t === MessageType.CONFIG_UPDATED ||
     t === MessageType.GET_CONFIG ||
     t === MessageType.LOG_PAUSED

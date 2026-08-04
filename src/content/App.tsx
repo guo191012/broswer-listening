@@ -62,8 +62,10 @@ export function App() {
   }, []);
 
   const handleConfigChange = useCallback(async (next: AppConfig) => {
+    console.info('[vibcoding-ext] handleConfigChange 收到新 config, sites=', next.sites.map((s) => `${s.id}:${s.host}:${s.interfaces.length}条`));
     setLocalConfig(next);
     await setConfig(next);
+    console.info('[vibcoding-ext] handleConfigChange 已写入 storage');
   }, []);
 
   const handleTogglePaused = useCallback(
@@ -103,19 +105,13 @@ export function App() {
       }
       return [entry, ...prev].slice(0, MAX_LOGS);
     });
-    // 命中了匹配的接口 → 开始闪烁
-    pendingCountRef.current += 1;
-    if (pendingCountRef.current === 1) setIsPending(true);
     await appendLog(entry);
   }, []);
 
-  // 监听 MAIN world 注入脚本的 postMessage: 响应返回时停止闪烁 + 补充响应体
+  // 监听 MAIN world 注入脚本的 postMessage: 补充响应体
+  // 注意: pending 的开启/关闭由 background 的 REQUEST_START / REQUEST_END 统一驱动,
+  // 此处不再操作 pendingCount, 避免与 webRequest 生命周期时序冲突导致提前停止.
   useEffect(() => {
-    const onEnd = () => {
-      pendingCountRef.current = Math.max(0, pendingCountRef.current - 1);
-      if (pendingCountRef.current === 0) setIsPending(false);
-    };
-
     const messageHandler = (e: MessageEvent) => {
       const msg = e.data as InjectMessage;
       if (!msg || msg.source !== 'vibcoding-inject') return;
@@ -125,7 +121,6 @@ export function App() {
       if (msg.type === 'response') {
         const { url, method, status, body } = msg.payload;
         console.log('[vibcoding-ext] 响应数据:', { url, method, status, bodyLen: body ? body.length : 0 });
-        onEnd();
         // 存储响应体到 pending 缓存，等待 background 推送 REQUEST_HIT 时合并
         const key = `${method}:${url}`;
         const ts = Date.now();
@@ -189,12 +184,33 @@ export function App() {
 
   // 监听 background 推送
   useEffect(() => {
+    // 记录仍在进行中的请求 url (按 method:url 去重), 避免同一请求重复计数
+    const activeRequests = new Set<string>();
+    const incPending = () => {
+      pendingCountRef.current += 1;
+      if (pendingCountRef.current === 1) setIsPending(true);
+    };
+    const decPending = () => {
+      pendingCountRef.current = Math.max(0, pendingCountRef.current - 1);
+      if (pendingCountRef.current === 0) setIsPending(false);
+    };
+
     const listener = (msg: unknown) => {
       if (!isExtensionMessage(msg)) return;
       const m = msg as ExtensionMessage;
       if (m.type === MessageType.REQUEST_HIT) {
         console.info('[vibcoding-ext]', formatConsoleMessage(m.payload));
         void handleHit(m.payload);
+      } else if (m.type === MessageType.REQUEST_START) {
+        const key = `${m.payload.method}:${m.payload.url}`;
+        if (activeRequests.has(key)) return;
+        activeRequests.add(key);
+        incPending();
+      } else if (m.type === MessageType.REQUEST_END) {
+        const key = `${m.payload.method}:${m.payload.url}`;
+        if (!activeRequests.has(key)) return;
+        activeRequests.delete(key);
+        decPending();
       } else if (m.type === MessageType.CONFIG_UPDATED) {
         setLocalConfig(m.payload);
       } else if (m.type === MessageType.LOG_PAUSED) {
